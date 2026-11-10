@@ -4,6 +4,7 @@
 //   hover), pinches/clicks it (press), walks away (leave)
 import { createSystem, Group, Hovered, Pressed, RayInteractable, Vector3, type Entity } from '@iwsdk/core';
 import { liveBus } from '../live-bus.js';
+import { liveMode } from '../live.js';
 import { requestAvatar } from '../muse-client.js';
 import { ui } from '../ui.js';
 import { buildAvatar, type AvatarRig } from './build.js';
@@ -111,7 +112,7 @@ export class AvatarSystem extends createSystem({}) {
     this.rig?.dispose();
     this.spec = spec;
     if (allowCustomSurface) this.customFailed = false;
-    this.rig = buildAvatar(spec, { allowCustomSurface: allowCustomSurface && !this.customFailed });
+    this.rig = buildAvatar(spec, { cgi: liveMode !== null, allowCustomSurface: allowCustomSurface && !this.customFailed });
     this.anchor.add(this.rig.root);
     this.pop = 0.35; // little arrival pop
     this.burst = 1;

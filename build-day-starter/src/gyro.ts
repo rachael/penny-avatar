@@ -9,12 +9,16 @@ const Q_X = new Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90° abou
 const euler = new Euler();
 const qTmp = new Quaternion();
 const qNow = new Quaternion();
-const qInitInv = new Quaternion();
+const qHome = new Quaternion(); // where "straight ahead" is; drifts after the phone
+const qHomeInv = new Quaternion();
 const qRel = new Quaternion();
-const qSmooth = new Quaternion();
 const qSaved = new Quaternion();
 let haveInit = false;
 let active = false;
+let lastT = 0;
+// Lazy follow: quick turns show the avatar staying put in the room; then
+// "home" drifts after the phone over a couple of seconds, so it never gets lost.
+const FOLLOW_PER_SEC = 0.6;
 
 function deviceQuat(out: Quaternion, alpha: number, beta: number, gamma: number, orient: number) {
   euler.set(beta, alpha, -gamma, 'YXZ');
@@ -30,11 +34,9 @@ function onOrientation(e: DeviceOrientationEvent) {
   const orient = ((screen.orientation?.angle ?? (window as any).orientation ?? 0) as number) * d;
   deviceQuat(qNow, e.alpha * d, e.beta * d, e.gamma * d, orient);
   if (!haveInit) {
-    qInitInv.copy(qNow).invert();
-    qSmooth.identity();
+    qHome.copy(qNow);
     haveInit = true;
   }
-  qRel.copy(qInitInv).multiply(qNow);
   active = true;
 }
 
@@ -61,9 +63,13 @@ export function installGyroCamera(scene: Scene, camera: PerspectiveCamera) {
   scene.onBeforeRender = function (...args: Parameters<Scene['onBeforeRender']>) {
     before.apply(this, args);
     if (!active || args[2] !== camera) return;
-    qSmooth.slerp(qRel, 0.5);
+    const now = performance.now() / 1000;
+    const dt = lastT ? Math.min(0.1, now - lastT) : 0;
+    lastT = now;
+    qHome.slerp(qNow, 1 - Math.exp(-dt * FOLLOW_PER_SEC));
+    qRel.copy(qHomeInv.copy(qHome).invert()).multiply(qNow);
     qSaved.copy(camera.quaternion);
-    camera.quaternion.multiply(qSmooth);
+    camera.quaternion.multiply(qRel);
     camera.updateMatrixWorld(true);
   };
   scene.onAfterRender = function (...args: Parameters<Scene['onAfterRender']>) {

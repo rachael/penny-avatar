@@ -12,6 +12,7 @@ import {
   IcosahedronGeometry,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial,
   OctahedronGeometry,
   Points,
   RingGeometry,
@@ -19,6 +20,7 @@ import {
   SphereGeometry,
   Sprite,
   SpriteMaterial,
+  SRGBColorSpace,
   TorusGeometry,
   TorusKnotGeometry,
   type BufferGeometry as Geo,
@@ -215,6 +217,7 @@ async function makeGlyph(svg: string, r: number): Promise<Sprite | null> {
     canvas.width = canvas.height = 512;
     canvas.getContext('2d')!.drawImage(img, 0, 0, 512, 512);
     const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
     const sprite = new Sprite(new SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
     sprite.scale.setScalar(r * 1.3);
     sprite.position.set(0, r * 1.75, 0);
@@ -228,7 +231,60 @@ async function makeGlyph(svg: string, r: number): Promise<Sprite | null> {
   }
 }
 
-export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolean }): AvatarRig {
+/**
+ * CGI look (live mode): a physically based body lit by the scene's image-based
+ * lighting, with the same noise displacement as the shader body. Ember picks
+ * the material through surface.style and the palette.
+ */
+function cgiMaterial(spec: AvatarSpec, u: Record<string, { value: any }>): MeshPhysicalMaterial {
+  const m = new MeshPhysicalMaterial({
+    color: new Color(spec.palette.primary),
+    roughness: 0.22,
+    metalness: 0.05,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
+    sheen: 0.6,
+    sheenColor: new Color(spec.palette.secondary),
+    emissive: new Color(spec.palette.glow),
+    emissiveIntensity: 0.06,
+    envMapIntensity: 2.2,
+    transparent: spec.surface.style === 'glass',
+  });
+  switch (spec.surface.style) {
+    case 'iridescent':
+      Object.assign(m, { iridescence: 1, iridescenceIOR: 1.7, iridescenceThicknessRange: [180, 620], roughness: 0.12 });
+      break;
+    case 'holographic':
+      Object.assign(m, { iridescence: 1, iridescenceIOR: 2.0, metalness: 0.75, roughness: 0.18 });
+      break;
+    case 'glass':
+      Object.assign(m, { transmission: 1, thickness: spec.form.scale * 2, ior: 1.5, roughness: 0.04, attenuationColor: new Color(spec.palette.secondary), attenuationDistance: spec.form.scale * 3 });
+      break;
+    case 'liquid':
+      Object.assign(m, { metalness: 1, roughness: 0.04 });
+      break;
+    case 'emissive':
+      Object.assign(m, { emissive: new Color(spec.palette.primary), emissiveIntensity: 0.9, roughness: 0.35 });
+      break;
+    case 'matte':
+      Object.assign(m, { roughness: 0.75, clearcoat: 0.2, sheen: 1 });
+      break;
+  }
+  m.onBeforeCompile = (shader) => {
+    for (const k of ['uTime', 'uEnergy', 'uDisplace', 'uNoiseScale', 'uRadius']) shader.uniforms[k] = u[k];
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nuniform float uTime, uEnergy, uDisplace, uNoiseScale, uRadius;\n${NOISE}`)
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        float museN = snoise(position / uRadius * uNoiseScale * 0.5 + vec3(0.0, uTime * (0.25 + uEnergy * 0.6), 0.0));
+        transformed += normal * museN * uDisplace * uRadius * 0.35 * (1.0 + uEnergy * 0.8);`,
+      );
+  };
+  return m;
+}
+
+export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolean; cgi?: boolean }): AvatarRig {
   const root = new Group();
   root.name = `avatar:${spec.name}`;
   const custom = opts.allowCustomSurface ? spec.surface.glsl : null;
@@ -260,7 +316,13 @@ export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolea
     side: spec.surface.style === 'glass' ? DoubleSide : FrontSide,
     wireframe: spec.form.base === 'lattice',
   });
-  const core = new Mesh(coreGeometry(spec), coreMat);
+  const cgi = opts.cgi ? cgiMaterial(spec, coreUniforms) : null;
+  const core = new Mesh(coreGeometry(spec), cgi ?? coreMat);
+  if (cgi) {
+    coreMat.dispose();
+    const base = cgi.emissiveIntensity;
+    core.onBeforeRender = () => (cgi.emissiveIntensity = base + coreUniforms.uEnergy.value * 0.5);
+  }
   core.name = 'avatar-core';
   root.add(core);
 
@@ -279,8 +341,10 @@ export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolea
   const rings: Mesh[] = [];
   for (let i = 0; i < spec.features.rings.count; i++) {
     const ring = new Mesh(
-      new TorusGeometry(spec.form.scale * (1.35 + i * 0.22), 0.0035, 8, 128),
-      new MeshBasicMaterial({ color: i % 2 ? spec.palette.accent : spec.palette.glow, transparent: true, opacity: 0.7 }),
+      new TorusGeometry(spec.form.scale * (1.35 + i * 0.22), opts.cgi ? spec.form.scale * 0.05 : 0.0035, opts.cgi ? 16 : 8, 128),
+      opts.cgi
+        ? new MeshPhysicalMaterial({ color: i % 2 ? spec.palette.accent : spec.palette.glow, metalness: 1, roughness: 0.15, envMapIntensity: 2 })
+        : new MeshBasicMaterial({ color: i % 2 ? spec.palette.accent : spec.palette.glow, transparent: true, opacity: 0.7 }),
     );
     ring.rotation.x = Math.PI / 2 + ((spec.features.rings.tilt * Math.PI) / 180) * (i % 2 ? -1 : 1);
     ring.rotation.y = i * 0.7;
@@ -315,7 +379,7 @@ export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolea
     },
   };
 
-  if (spec.glyphSvg) {
+  if (spec.glyphSvg && !opts.cgi) {
     makeGlyph(spec.glyphSvg, spec.form.scale).then((g) => {
       if (g && root.parent) {
         rig.glyph = g;
