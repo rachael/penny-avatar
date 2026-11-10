@@ -2,7 +2,11 @@
 // spec; AvatarSystem animates the uniforms each frame.
 import {
   AdditiveBlending,
+  BoxGeometry,
   BufferAttribute,
+  CapsuleGeometry,
+  ConeGeometry,
+  CylinderGeometry,
   BufferGeometry,
   CanvasTexture,
   Color,
@@ -25,7 +29,7 @@ import {
   TorusKnotGeometry,
   type BufferGeometry as Geo,
 } from '@iwsdk/core';
-import type { AvatarSpec } from './spec.js';
+import type { AvatarSpec, Part } from './spec.js';
 
 const STYLE_INDEX = { iridescent: 0, glass: 1, emissive: 2, matte: 3, holographic: 4, liquid: 5 } as const;
 
@@ -284,6 +288,44 @@ function cgiMaterial(spec: AvatarSpec, u: Record<string, { value: any }>): MeshP
   return m;
 }
 
+function partGeometry(p: Part): Geo {
+  switch (p.shape) {
+    case 'capsule':
+      return new CapsuleGeometry(0.5, 1, 8, 24);
+    case 'cone':
+      return new ConeGeometry(0.5, 1, 32);
+    case 'box':
+      return new BoxGeometry(1, 1, 1, 2, 2, 2);
+    case 'torus':
+      return new TorusGeometry(0.5, 0.16, 24, 64);
+    case 'cylinder':
+      return new CylinderGeometry(0.5, 0.5, 1, 32);
+    default:
+      return new SphereGeometry(0.5, 40, 24);
+  }
+}
+
+/** Ember's procedural asset: primitives placed in body radii, each with its own CGI material. */
+function buildParts(spec: AvatarSpec, u: Record<string, { value: any }>): Group | null {
+  if (!spec.parts.length) return null;
+  const g = new Group();
+  g.name = 'avatar-parts';
+  const r = spec.form.scale;
+  const d = Math.PI / 180;
+  for (const p of spec.parts) {
+    const ps = { ...spec, palette: { ...spec.palette, primary: p.color }, surface: { ...spec.surface, style: p.style } };
+    const mat = cgiMaterial(ps, u);
+    mat.emissive.set(p.color);
+    mat.emissiveIntensity = p.glow * 1.2;
+    const mesh = new Mesh(partGeometry(p), mat);
+    mesh.position.set(p.pos[0] * r, p.pos[1] * r, p.pos[2] * r);
+    mesh.rotation.set(p.rot[0] * d, p.rot[1] * d, p.rot[2] * d);
+    mesh.scale.set(p.scale[0] * r, p.scale[1] * r, p.scale[2] * r);
+    g.add(mesh);
+  }
+  return g;
+}
+
 export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolean; cgi?: boolean }): AvatarRig {
   const root = new Group();
   root.name = `avatar:${spec.name}`;
@@ -318,6 +360,13 @@ export function buildAvatar(spec: AvatarSpec, opts: { allowCustomSurface: boolea
   });
   const cgi = opts.cgi ? cgiMaterial(spec, coreUniforms) : null;
   const core = new Mesh(coreGeometry(spec), cgi ?? coreMat);
+  // With a parts asset, the parts are the body: they ride on the core (and its
+  // spin), and the core itself shrinks to an inner heart.
+  const parts = opts.cgi ? buildParts(spec, coreUniforms) : null;
+  if (parts) {
+    core.add(parts);
+    core.geometry.scale(0.45, 0.45, 0.45);
+  }
   if (cgi) {
     coreMat.dispose();
     const base = cgi.emissiveIntensity;

@@ -185,7 +185,13 @@ export function musePlugin(root: string): Plugin {
       m.completionTokens += ct;
       if (!(Number.isFinite(reported) && u.cost != null)) m.estimated = true;
       live.seq += 1;
-      if (r.spec && typeof r.spec === 'object') live.spec = r.spec;
+      if (r.spec && typeof r.spec === 'object') {
+        // Parts are the expensive bit: Ember sends them only when it reshapes
+        // its asset, so keep the previous parts when a look leaves them out.
+        const prev: any = live.spec;
+        if (!Array.isArray(r.spec.parts) && Array.isArray(prev?.parts)) r.spec.parts = prev.parts;
+        live.spec = r.spec;
+      }
       live.saw = String(r.saw ?? '').slice(0, 120);
       live.heard = String(r.heard ?? '').slice(0, 120);
       live.feeling = String(r.feeling ?? '').slice(0, 80);

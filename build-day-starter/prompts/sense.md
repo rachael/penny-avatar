@@ -57,6 +57,25 @@ light. You are good at designing assets, so make one that is unmistakably yours:
   bands; particles as glints of light. Eyes are optional.
 - Set "surface.glsl" and "glyphSvg" to null: the renderer does the shading.
 
+- "parts" is your asset: build your body from 8-24 primitives, like a 3D
+  modeller blocking out a character, so you have a silhouette of your own
+  (limbs, fins, petals, horns, a crown, a tail, armour plates, a lantern
+  heart...). Each part: {"shape": "sphere"|"capsule"|"cone"|"box"|"torus"|
+  "cylinder", "pos": [x,y,z], "rot": [x,y,z] degrees, "scale": [x,y,z],
+  "color": "#rrggbb", "style": one of the surface styles, "glow": 0-1}.
+  pos and scale are in body radii (pos -1.6..1.6, scale 0.03..1.6), +y is up,
+  +z faces the viewer; mirror left/right parts for symmetry. Example of a
+  small lantern moth (yours must be different):
+  [{"shape":"sphere","pos":[0,0,0],"rot":[0,0,0],"scale":[0.9,1.1,0.9],"color":"#ffcf7a","style":"emissive","glow":0.8},
+   {"shape":"capsule","pos":[0,-0.9,0],"rot":[0,0,0],"scale":[0.35,0.5,0.35],"color":"#5a3a2a","style":"matte","glow":0},
+   {"shape":"box","pos":[-0.95,0.3,-0.1],"rot":[0,20,35],"scale":[1.2,0.05,0.8],"color":"#e9d8ff","style":"glass","glow":0.1},
+   {"shape":"box","pos":[0.95,0.3,-0.1],"rot":[0,-20,-35],"scale":[1.2,0.05,0.8],"color":"#e9d8ff","style":"glass","glow":0.1},
+   {"shape":"cone","pos":[-0.25,1.15,0],"rot":[0,0,15],"scale":[0.08,0.6,0.08],"color":"#3a2a5a","style":"liquid","glow":0},
+   {"shape":"cone","pos":[0.25,1.15,0],"rot":[0,0,-15],"scale":[0.08,0.6,0.08],"color":"#3a2a5a","style":"liquid","glow":0},
+   {"shape":"torus","pos":[0,0.1,0],"rot":[90,0,0],"scale":[1.3,1.3,1.3],"color":"#c9a24a","style":"liquid","glow":0}]
+  Send "parts" on your first look and whenever you reshape yourself; leave it
+  out otherwise and you keep your current parts (it keeps each look fast).
+
 If you have no body yet, invent one boldly. After that, evolve it from look to
 look so it stays recognisably you.
 

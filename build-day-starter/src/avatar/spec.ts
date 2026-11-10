@@ -14,7 +14,19 @@ export interface Reaction {
   tint: string | null;
 }
 
+export const PART_SHAPES = ['sphere', 'capsule', 'cone', 'box', 'torus', 'cylinder'] as const;
+export interface Part {
+  shape: (typeof PART_SHAPES)[number];
+  pos: [number, number, number]; // in body radii, -1.6..1.6
+  rot: [number, number, number]; // degrees
+  scale: [number, number, number]; // in body radii, 0.03..1.6
+  color: string;
+  style: (typeof STYLES)[number];
+  glow: number; // 0-1 emissive
+}
+
 export interface AvatarSpec {
+  parts: Part[]; // optional procedural asset; empty = the base form alone
   name: string;
   persona: string;
   greeting: string;
@@ -43,6 +55,7 @@ export interface AvatarSpec {
 
 /** Shown before the first call returns, and whenever a call fails. */
 export const FALLBACK_SPEC: AvatarSpec = {
+  parts: [],
   name: 'Seed',
   persona: 'A placeholder presence, waiting for Muse to choose a body.',
   greeting: 'Press New avatar and I will become someone.',
@@ -104,7 +117,24 @@ export function sanitizeSpec(input: unknown): AvatarSpec {
   const eyes = obj(feat.eyes), rings = obj(feat.rings), parts = obj(feat.particles);
   const amb = obj(s.ambient), re = obj(s.reactions), mo = obj(s.motion);
   const glsl = typeof surf.glsl === 'string' && surf.glsl.trim().length > 8 && surf.glsl.length < 6000 ? surf.glsl : null;
+  const v3 = (v: unknown, lo: number, hi: number, dv: number): [number, number, number] => {
+    const a = Array.isArray(v) ? v : [];
+    return [num(a[0], lo, hi, dv), num(a[1], lo, hi, dv), num(a[2], lo, hi, dv)];
+  };
+  const assetParts: Part[] = (Array.isArray(s.parts) ? s.parts : []).slice(0, 32).map((p: unknown) => {
+    const q = obj(p);
+    return {
+      shape: pick(q.shape, PART_SHAPES, 'sphere'),
+      pos: v3(q.pos, -1.6, 1.6, 0),
+      rot: v3(q.rot, -360, 360, 0),
+      scale: v3(q.scale, 0.03, 1.6, 0.3),
+      color: hex(q.color, d.palette.primary),
+      style: pick(q.style, STYLES, 'iridescent'),
+      glow: num(q.glow, 0, 1, 0),
+    };
+  });
   return {
+    parts: assetParts,
     name: str(s.name, d.name, 40),
     persona: str(s.persona, d.persona),
     greeting: str(s.greeting, d.greeting, 120),
