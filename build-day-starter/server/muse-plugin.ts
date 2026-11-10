@@ -33,6 +33,39 @@ function readBody(req: IncomingMessage, limit = 8_000_000): Promise<any> {
   });
 }
 
+// Live mode: the phone posts what it senses; the laptop mirror polls /api/state.
+// One shared state per dev server (one phone driving, any number of mirrors).
+// Fallback price if OpenRouter doesn't report usage.cost: $0.10 / $0.50 per M tokens.
+const PRICE_IN = 0.1 / 1e6;
+const PRICE_OUT = 0.5 / 1e6;
+const live = {
+  seq: 0,
+  spec: null as unknown,
+  saw: '',
+  heard: '',
+  feeling: '',
+  frame: '',
+  ms: 0,
+  model: '',
+  error: '',
+  meter: { cost: 0, looks: 0, promptTokens: 0, completionTokens: 0, estimated: false, budget: 1 },
+};
+
+const MOTION_PATHS = ['orbit', 'dart', 'wander', 'hover'];
+function mockSense() {
+  const spec: any = mockSpec();
+  const r = () => Math.round((Math.random() * 2 - 1) * 100) / 100;
+  spec.motion = {
+    x: r(), y: r() * 0.7, z: r() * 0.6,
+    path: MOTION_PATHS[Math.floor(Math.random() * MOTION_PATHS.length)],
+    speed: Math.random(), jitter: Math.random() * 0.6, radius: Math.random(),
+  };
+  return {
+    saw: 'mock frame', heard: 'mock audio', feeling: 'pretending to look',
+    spec, usage: { prompt_tokens: 1200, completion_tokens: 600 }, model: 'mock', ms: 5,
+  };
+}
+
 function send(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
@@ -110,6 +143,68 @@ export function musePlugin(root: string): Plugin {
       return { ...result.json, model: result.model, ms: result.ms };
     },
 
+    // Live mode: one camera frame + ~4 s of 16 kHz mono WAV → Ember reacts by
+    // reshaping and moving its own body. Returns {saw, heard, feeling, spec, meter}.
+    '/api/sense': async (body) => {
+      const image = String(body.image ?? '');
+      const audio = String(body.audio ?? '').replace(/^data:audio\/\w+;base64,/, '');
+      if (!image.startsWith('data:image/')) throw new Error('expected image as a data:image URL');
+      let r: any;
+      if (isMock()) r = mockSense();
+      else {
+        const [sensePrompt, schema] = await Promise.all([loadPrompt(root, 'sense.md'), loadPrompt(root, 'avatar-schema.md')]);
+        const content: any[] = [
+          {
+            type: 'text',
+            text:
+              `Your current body:\n${JSON.stringify(live.spec ?? body.spec ?? null)}\n` +
+              `Last time you saw: ${live.saw || 'nothing yet'}; heard: ${live.heard || 'nothing yet'}.\n` +
+              'Here is what is in front of you now. React.',
+          },
+          { type: 'image_url', image_url: { url: image } },
+        ];
+        if (audio.length > 100) content.push({ type: 'input_audio', input_audio: { data: audio, format: 'wav' } });
+        const res = await chatJson({
+          model: models().designer,
+          system: `${sensePrompt}\n\n${schema}`,
+          user: content as any,
+          temperature: 0.8,
+          maxTokens: 2500,
+        });
+        r = { ...res.json, usage: res.usage, model: res.model, ms: res.ms };
+      }
+      const u = r.usage ?? {};
+      const pt = Number(u.prompt_tokens) || 0;
+      const ct = Number(u.completion_tokens) || 0;
+      const reported = Number(u.cost);
+      const cost = Number.isFinite(reported) && u.cost != null ? reported : pt * PRICE_IN + ct * PRICE_OUT;
+      const m = live.meter;
+      m.cost += cost;
+      m.looks += 1;
+      m.promptTokens += pt;
+      m.completionTokens += ct;
+      if (!(Number.isFinite(reported) && u.cost != null)) m.estimated = true;
+      live.seq += 1;
+      if (r.spec && typeof r.spec === 'object') live.spec = r.spec;
+      live.saw = String(r.saw ?? '').slice(0, 120);
+      live.heard = String(r.heard ?? '').slice(0, 120);
+      live.feeling = String(r.feeling ?? '').slice(0, 80);
+      live.frame = image.length < 400_000 ? image : '';
+      live.ms = r.ms ?? 0;
+      live.model = r.model ?? '';
+      live.error = '';
+      void saveRun(root, 'sense', { saw: live.saw, heard: live.heard, feeling: live.feeling, spec: live.spec, usage: u, cost, meter: m });
+      return { seq: live.seq, spec: live.spec, saw: live.saw, heard: live.heard, feeling: live.feeling, ms: live.ms, model: live.model, lookCost: cost, meter: m };
+    },
+
+    '/api/reset': async () => {
+      live.seq += 1;
+      live.spec = null;
+      live.saw = live.heard = live.feeling = live.frame = '';
+      live.meter = { cost: 0, looks: 0, promptTokens: 0, completionTokens: 0, estimated: false, budget: 1 };
+      return { ok: true };
+    },
+
     // Optional: Muse Image texture for the avatar (?img=1 on the page).
     '/api/image': async (body) => {
       if (isMock()) throw new Error('image route has no mock');
@@ -126,6 +221,12 @@ export function musePlugin(root: string): Plugin {
         if (path === '/api/health') {
           return send(res, 200, { key: hasKey(), mock: isMock(), models: models() });
         }
+        if (path === '/api/state') {
+          // Mirror polling. ?since=N skips the frame when nothing changed.
+          const since = Number(new URL(req.url ?? '', 'http://x').searchParams.get('since') ?? -1);
+          const fresh = since !== live.seq;
+          return send(res, 200, { ...live, frame: fresh ? live.frame : '', spec: fresh ? live.spec : null });
+        }
         const route = routes[path];
         if (!route) return next();
         if (req.method !== 'POST') return send(res, 405, { error: 'POST only' });
@@ -135,6 +236,7 @@ export function musePlugin(root: string): Plugin {
         try {
           send(res, 200, await route(await readBody(req)));
         } catch (err: any) {
+          if (path === '/api/sense') live.error = String(err?.message ?? err).slice(0, 300);
           server.config.logger.error(`[muse] ${path}: ${err?.message ?? err}`);
           send(res, 502, { error: String(err?.message ?? err) });
         }

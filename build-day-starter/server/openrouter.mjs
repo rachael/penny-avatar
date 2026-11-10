@@ -41,7 +41,7 @@ async function post(body) {
     headers: {
       Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
-      'X-Title': 'Build Day avatar starter',
+      'X-Title': 'Penny Avatar',
     },
     body: JSON.stringify(body),
   });
@@ -63,7 +63,8 @@ export async function chatJson({ model, system, user, temperature = 0.9, maxToke
     { role: 'system', content: system },
     { role: 'user', content: user },
   ];
-  const base = { model, messages, temperature, max_tokens: maxTokens };
+  // usage.include asks OpenRouter to report the real cost (usage.cost) for the spend meter.
+  const base = { model, messages, temperature, max_tokens: maxTokens, usage: { include: true } };
   if (process.env.MUSE_REASONING) base.reasoning = { effort: process.env.MUSE_REASONING };
   const t0 = Date.now();
   let data;

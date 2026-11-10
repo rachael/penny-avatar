@@ -15,7 +15,9 @@ Object.assign(process.env, { ...loadEnv('development', process.cwd(), ''), ...pr
 
 export default defineConfig({
   plugins: [iwsdkDev(), musePlugin(process.cwd())],
-  server: { host: '0.0.0.0', port: 8081, open: false },
+  // allowedHosts: the phone reaches this dev server through a cloudflared quick tunnel
+  // (*.trycloudflare.com), which Vite would otherwise reject as an unknown Host.
+  server: { host: '0.0.0.0', port: 8081, open: false, allowedHosts: ['.trycloudflare.com', 'localhost'] },
   build: {
     outDir: 'dist',
     sourcemap: process.env.NODE_ENV !== 'production',
