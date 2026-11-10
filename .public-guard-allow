@@ -1,0 +1,2 @@
+# Upstream IWSDK starter skill docs: debugging vocabulary, not personal context.
+build-day-starter/\.(agents|claude)/skills/.*:health

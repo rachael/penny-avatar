@@ -1,0 +1,38 @@
+<!--
+  Panel, Button and ButtonLabel come from the bundled Horizon kit.
+  #status is updated from src/panel.ts with whatever the avatar is doing.
+-->
+<style>
+  .panel-root { flex-direction: column; width: 420px; }
+  .panel-content { flex-direction: column; gap: 7px; padding: 22px; }
+  .eyebrow { color: #6b5a00; font-size: 14px; font-weight: 700; letter-spacing: 1.4px; }
+  .eyebrow:dark { color: #a5b4fc; }
+  .heading { color: #1c1d20; font-size: 28px; font-weight: 700; line-height: 34px; }
+  .heading:dark { color: #fafaf7; }
+  .body { color: #3a3b40; font-size: 18px; line-height: 24px; }
+  .body:dark { color: #dddfe3; }
+  .button { justify-content: flex-start; margin-left: 22px; margin-right: 22px; margin-bottom: 12px; }
+  .button-label { transform-translate-y: 1px; }
+</style>
+<Panel class="panel-root">
+  <div class="panel-content">
+    <div class="eyebrow">BUILD DAY - MUSE</div>
+    <div class="heading">An avatar that chose itself</div>
+    <div id="status" class="body">Press New avatar.</div>
+  </div>
+  <Button id="regen-button" class="button">
+    <ButtonLabel class="button-label">New avatar</ButtonLabel>
+  </Button>
+  <Button id="canvas-button" class="button">
+    <ButtonLabel class="button-label">AR canvas on/off</ButtonLabel>
+  </Button>
+  <Button id="muse-button" class="button">
+    <ButtonLabel class="button-label">Muse, add to the sketch</ButtonLabel>
+  </Button>
+  <Button id="xr-button" class="button">
+    <ButtonLabel class="button-label">Enter AR</ButtonLabel>
+  </Button>
+  <Button id="exit-button" class="button" style="display: none">
+    <ButtonLabel class="button-label">Exit to browser</ButtonLabel>
+  </Button>
+</Panel>
