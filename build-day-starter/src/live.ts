@@ -1,8 +1,12 @@
 // Live mode (?live=1, the phone): camera + mic → every ~6 s, 4 s of 16 kHz mono
 // WAV plus one 512 px JPEG go to /api/sense; Muse Ember answers with a new body
-// and motion as its own reaction, and a spend meter keeps the running cost.
-// Mirror mode (?mirror=1, the laptop): polls /api/state and follows the phone.
+// and motion as its own reaction, and a slim spend meter keeps the running cost.
+// The camera feed fills the screen behind a transparent canvas and the 3D camera
+// turns with the phone, so the avatar stays put in the room.
+// Mirror mode (?mirror=1, the laptop): polls /api/state and follows the phone,
+// with the phone's last frame as the backdrop.
 import { sanitizeSpec } from './avatar/spec.js';
+import { recentreGyro, startGyro } from './gyro.js';
 import { liveBus } from './live-bus.js';
 
 const params = new URLSearchParams(location.search);
@@ -23,61 +27,53 @@ interface Meter {
   budget: number;
 }
 
-// ---------- overlay: meter + saw/heard (rows keep their space, nothing jumps) ----------
+const fmtTokens = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(0)}k` : n.toLocaleString());
+
+// ---------- slim meter: one strip at the top, two short lines (nothing jumps) ----------
 function mountOverlay() {
   const el = document.createElement('div');
   el.id = 'penny';
   el.innerHTML = `
     <style>
       #hud { display: none !important; }
-      #penny { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-        font: 14px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; color: #f5f3ea;
-        background: linear-gradient(to top, rgba(10,9,6,.88), rgba(10,9,6,.55) 75%, rgba(10,9,6,0)); pointer-events: none; }
-      #penny .top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-      #penny .brand { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; color: #e9b949; }
-      #penny .cost { font-size: 26px; font-weight: 700; color: #ffd66b; font-variant-numeric: tabular-nums; }
-      #penny .cost small { font-size: 14px; color: #c9c3b0; font-weight: 400; }
-      #penny .bar { height: 4px; background: rgba(255,255,255,.12); border-radius: 2px; margin: 6px 0 8px; overflow: hidden; }
+      #scene-container canvas { position: relative; z-index: 1; }
+      .penny-backdrop { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 0; background: #0d0b07; }
+      #penny { position: fixed; left: 0; right: 0; top: 0; z-index: 20; pointer-events: none;
+        padding: calc(6px + env(safe-area-inset-top)) 12px 0; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: rgba(245,243,234,.92); text-shadow: 0 1px 2px rgba(0,0,0,.7); }
+      #penny .l1, #penny .l2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
+      #penny .l1 b { color: #ffd66b; font-weight: 700; font-variant-numeric: tabular-nums; }
+      #penny .l1 .dim, #penny .l2 { color: rgba(245,243,234,.62); }
+      #penny .l2.err { color: #ff9d8a; }
+      #penny .bar { height: 2px; margin-top: 3px; background: rgba(255,255,255,.14); border-radius: 1px; overflow: hidden; }
       #penny .bar i { display: block; height: 100%; width: 0; background: #e9b949; transition: width .6s; }
-      #penny .stats { color: #c9c3b0; font-size: 12px; min-height: 1.35em; }
-      #penny .row { min-height: 1.35em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #penny .row b { color: #e9b949; font-weight: 600; display: inline-block; width: 4.2em; }
-      #penny .status { color: #9c968a; font-size: 12px; min-height: 1.35em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #penny button { pointer-events: auto; font: inherit; font-size: 16px; font-weight: 700; padding: 12px 18px; border-radius: 999px;
-        border: 0; background: #e9b949; color: #1a1406; margin-top: 8px; width: 100%; }
-      #penny-cam { position: fixed; top: 12px; right: 12px; z-index: 20; width: 96px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25);
-        background: #000; aspect-ratio: 3/4; object-fit: cover; }
+      #penny-go { position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 21;
+        font: 600 15px/1 system-ui, sans-serif; padding: 14px 22px; border-radius: 999px; border: 0; background: #e9b949; color: #1a1406;
+        box-shadow: 0 6px 24px rgba(0,0,0,.4); }
     </style>
-    <div class="top"><span class="brand">Penny Avatar · Muse Ember</span><span class="name" id="p-name">&nbsp;</span></div>
-    <div class="cost" id="p-cost">$0.0000 <small>of $1.00</small></div>
+    <div class="l1"><b id="p-cost">$0.0000</b> <span class="dim">of $1.00</span> · <span id="p-looks">0 looks</span> <span class="dim" id="p-tok">· 0 tokens</span> <span class="dim" id="p-name"></span></div>
     <div class="bar"><i id="p-bar"></i></div>
-    <div class="stats" id="p-stats">0 looks · 0 tokens</div>
-    <div class="row"><b>saw</b><span id="p-saw">&nbsp;</span></div>
-    <div class="row"><b>heard</b><span id="p-heard">&nbsp;</span></div>
-    <div class="row"><b>feels</b><span id="p-feel">&nbsp;</span></div>
-    <div class="status" id="p-status">&nbsp;</div>`;
+    <div class="l2" id="p-l2">Penny Avatar · Muse Ember</div>`;
   document.body.appendChild(el);
   const $ = (id: string) => el.querySelector<HTMLElement>('#' + id)!;
+  let sensedText = '';
   return {
-    el,
     meter(m: Meter) {
-      $('p-cost').innerHTML = `$${m.cost.toFixed(4)} <small>of $${m.budget.toFixed(2)}${m.estimated ? ' (est.)' : ''}</small>`;
+      $('p-cost').textContent = `$${m.cost.toFixed(4)}`;
       $('p-bar').style.width = `${Math.min(100, (m.cost / m.budget) * 100)}%`;
-      const tokens = m.promptTokens + m.completionTokens;
-      const per = m.looks ? m.cost / m.looks : 0;
-      const left = per > 0 ? Math.floor((m.budget - m.cost) / per) : 0;
-      $('p-stats').textContent =
-        `${m.looks} look${m.looks === 1 ? '' : 's'} · ${tokens.toLocaleString()} tokens` +
-        (per > 0 ? ` · $${per.toFixed(5)}/look · ~${left.toLocaleString()} looks left` : '');
+      $('p-looks').textContent = `${m.looks} look${m.looks === 1 ? '' : 's'}`;
+      $('p-tok').textContent = `· ${fmtTokens(m.promptTokens + m.completionTokens)} tokens${m.estimated ? ' (est.)' : ''}`;
     },
     sensed(saw: string, heard: string, feeling: string, name: string) {
-      $('p-saw').textContent = saw || ' ';
-      $('p-heard').textContent = heard || ' ';
-      $('p-feel').textContent = feeling || ' ';
-      $('p-name').textContent = name || ' ';
+      sensedText = [saw && `saw ${saw}`, heard && `heard ${heard}`, feeling && `→ ${feeling}`].filter(Boolean).join(' · ');
+      $('p-name').textContent = name ? `· ${name}` : '';
+      this.status('');
     },
-    status(t: string) {
-      $('p-status').textContent = t || ' ';
+    /** Errors and hints borrow line 2 for a moment, then the last saw/heard returns. */
+    status(t: string, isError = false) {
+      const l2 = $('p-l2');
+      l2.textContent = t || sensedText || 'Penny Avatar · Muse Ember';
+      l2.classList.toggle('err', Boolean(t) && isError);
     },
   };
 }
@@ -168,11 +164,13 @@ function grabFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): string {
 // ---------- live (phone) ----------
 async function startLive(ov: ReturnType<typeof mountOverlay>) {
   const btn = document.createElement('button');
+  btn.id = 'penny-go';
   btn.textContent = 'Let it see and hear';
-  ov.el.appendChild(btn);
-  ov.status('Tap to give the avatar your camera and mic.');
+  document.body.appendChild(btn);
+  ov.status('Tap below to give it your camera and mic.');
   await new Promise<void>((r) => btn.addEventListener('click', () => r(), { once: true }));
   btn.remove();
+  void startGyro(); // in the same gesture, for browsers that ask
 
   let stream: MediaStream;
   try {
@@ -181,21 +179,22 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
       audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true },
     });
   } catch (err) {
-    ov.status(`Camera/mic blocked: ${(err as Error).message}. Needs HTTPS and permission.`);
+    ov.status(`Camera/mic blocked: ${(err as Error).message}. Needs HTTPS and permission.`, true);
     return;
   }
+  // The live camera is the room; the transparent 3D canvas sits on top of it.
   const video = document.createElement('video');
-  video.id = 'penny-cam';
+  video.className = 'penny-backdrop';
   video.muted = true;
   video.playsInline = true;
   video.srcObject = stream;
-  document.body.appendChild(video);
+  document.body.prepend(video);
   await video.play().catch(() => {});
-  // index.ts puts the camera feed behind the avatar, so it floats in the room.
-  window.dispatchEvent(new CustomEvent('penny-camera', { detail: video }));
+  recentreGyro(); // "home" is wherever the phone points now
   const tap = new AudioTap(stream);
   await tap.resume();
   const canvas = document.createElement('canvas');
+  ov.status('Listening… first look in a few seconds.');
 
   let inFlight = false;
   const look = async () => {
@@ -203,8 +202,6 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
     const image = grabFrame(video, canvas);
     if (!image) return;
     inFlight = true;
-    ov.status('Ember is looking and listening…');
-    const t0 = performance.now();
     try {
       const res = await fetch('/api/sense', {
         method: 'POST',
@@ -214,9 +211,8 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       apply(ov, data);
-      ov.status(`${data.model ?? 'ember'} · ${((performance.now() - t0) / 1000).toFixed(1)} s · $${Number(data.lookCost ?? 0).toFixed(5)} this look`);
     } catch (err) {
-      ov.status(`Look failed: ${(err as Error).message}`);
+      ov.status(`Look failed: ${(err as Error).message}`, true);
     } finally {
       inFlight = false;
     }
@@ -242,10 +238,12 @@ function apply(ov: ReturnType<typeof mountOverlay>, data: any) {
 // ---------- mirror (laptop) ----------
 function startMirror(ov: ReturnType<typeof mountOverlay>) {
   const img = document.createElement('img');
-  img.id = 'penny-cam';
-  img.style.width = '160px';
-  img.alt = 'What the phone last showed Ember';
-  document.body.appendChild(img);
+  img.className = 'penny-backdrop';
+  img.alt = '';
+  img.style.filter = 'brightness(.8)';
+  document.body.prepend(img);
+  img.style.visibility = 'hidden';
+  img.addEventListener('load', () => (img.style.visibility = 'visible'));
   let seq = -1;
   ov.status('Mirroring the phone. Waiting for its first look…');
   const poll = async () => {
@@ -255,11 +253,10 @@ function startMirror(ov: ReturnType<typeof mountOverlay>) {
         seq = data.seq;
         if (data.frame) img.src = data.frame;
         apply(ov, data);
-        if (data.seq > 0) ov.status(`mirroring · look #${data.meter.looks} · ${data.model} · ${(data.ms / 1000).toFixed(1)} s`);
       }
-      if (data.error) ov.status(`phone's last look failed: ${data.error}`);
+      if (data.error) ov.status(`Phone's last look failed: ${data.error}`, true);
     } catch {
-      ov.status('Lost the dev server; retrying…');
+      ov.status('Lost the dev server; retrying…', true);
     }
   };
   void poll();

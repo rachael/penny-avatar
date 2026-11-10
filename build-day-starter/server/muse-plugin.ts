@@ -168,8 +168,8 @@ export function musePlugin(root: string): Plugin {
           model: models().designer,
           system: `${sensePrompt}\n\n${schema}`,
           user: content as any,
-          temperature: 0.8,
-          maxTokens: 2500,
+          temperature: 0.9,
+          maxTokens: 5000, // room for a custom GLSL surface and SVG glyph
         });
         r = { ...res.json, usage: res.usage, model: res.model, ms: res.ms };
       }

@@ -18,7 +18,7 @@ const NEAR_HAND = 0.35;
 // bigger the body is drawn so a 0.14 m avatar reads at 1.5-3 m on a phone.
 const DEPTH_NEAR = 1.2;
 const DEPTH_FAR = 3.0;
-const FLAT_SCALE = 1.6;
+const FLAT_SCALE = 1.0; // small enough to read as a thing in the room, not a sticker
 const EDGE_MARGIN = 0.06; // fraction of the half-frame kept clear at the edges
 
 const smooth01 = (x: number) => x * x * (3 - 2 * x);
@@ -189,7 +189,7 @@ export class AvatarSystem extends createSystem({}) {
       aspect = a && Number.isFinite(a) ? a : window.innerWidth / Math.max(1, window.innerHeight);
       // Bigger body for flat screens, capped so it never fills a portrait phone.
       const midHalf = ((DEPTH_NEAR + DEPTH_FAR) / 2) * halfTan * Math.min(1, aspect);
-      this.flatMul = Math.max(1, Math.min(FLAT_SCALE, (0.3 * midHalf) / s.form.scale));
+      this.flatMul = Math.max(0.5, Math.min(FLAT_SCALE, (0.14 * midHalf) / s.form.scale));
     } else {
       this.camPos.copy(HOME);
       this.camRight.set(1, 0, 0);
