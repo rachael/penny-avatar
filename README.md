@@ -6,6 +6,12 @@ Built for the OpenRouter x Meta Build Day at Shack15, on the challenge "the most
 
 The app is called Penny Avatar because it costs pennies to run, like a penny arcade. The avatar itself is not called Penny: it chooses its own name and form.
 
+
+> **Update (after the event):** live mode now starts with one `/api/design` call where Muse Ember
+> chooses its own avatar as a CGI asset (19 primitives with physically based materials; its first
+> pick was "a small ember-fox wisp who collects warm moments"). Each look then only reacts on top:
+> motion, energy and reactions, about once a second, at roughly $0.0006 per look.
+
 ## What it is
 
 A reactive spatial avatar. A Pixel phone's camera and microphone sense the room. About every 6 seconds the phone sends 4 seconds of audio and one photo to the dev server, which asks Muse Ember what it saw and heard and how the avatar should respond.

@@ -41,6 +41,7 @@ const PRICE_OUT = 0.5 / 1e6;
 const live = {
   seq: 0,
   spec: null as unknown,
+  base: null as unknown,
   saw: '',
   heard: '',
   feeling: '',
@@ -152,12 +153,12 @@ export function musePlugin(root: string): Plugin {
       let r: any;
       if (isMock()) r = mockSense();
       else {
-        const [sensePrompt, schema] = await Promise.all([loadPrompt(root, 'sense.md'), loadPrompt(root, 'avatar-schema.md')]);
+        const sensePrompt = await loadPrompt(root, 'sense.md');
         const content: any[] = [
           {
             type: 'text',
             text:
-              `Your current body:\n${JSON.stringify(live.spec ?? body.spec ?? null)}\n` +
+              `Your body (fixed): ${JSON.stringify({ name: (live.spec as any)?.name, persona: (live.spec as any)?.persona })}\n` +
               `Last time you saw: ${live.saw || 'nothing yet'}; heard: ${live.heard || 'nothing yet'}.\n` +
               'Here is what is in front of you now. React.',
           },
@@ -166,10 +167,10 @@ export function musePlugin(root: string): Plugin {
         if (audio.length > 100) content.push({ type: 'input_audio', input_audio: { data: audio, format: 'wav' } });
         const res = await chatJson({
           model: models().designer,
-          system: `${sensePrompt}\n\n${schema}`,
+          system: sensePrompt,
           user: content as any,
           temperature: 0.9,
-          maxTokens: 5000, // room for a custom GLSL surface and SVG glyph
+          maxTokens: 1500, // reactions only; the body comes from /api/design
         });
         r = { ...res.json, usage: res.usage, model: res.model, ms: res.ms };
       }
@@ -188,9 +189,10 @@ export function musePlugin(root: string): Plugin {
       if (r.spec && typeof r.spec === 'object') {
         // Parts are the expensive bit: Ember sends them only when it reshapes
         // its asset, so keep the previous parts when a look leaves them out.
-        const prev: any = live.spec;
-        if (!Array.isArray(r.spec.parts) && Array.isArray(prev?.parts)) r.spec.parts = prev.parts;
-        live.spec = r.spec;
+        // The body is the base Ember designed in /api/design; a look only
+        // changes motion, ambient and reactions on top of it.
+        const base: any = live.base ?? live.spec ?? {};
+        live.spec = { ...base, motion: r.spec.motion ?? base.motion, ambient: r.spec.ambient ?? base.ambient, reactions: r.spec.reactions ?? base.reactions };
       }
       live.saw = String(r.saw ?? '').slice(0, 120);
       live.heard = String(r.heard ?? '').slice(0, 120);
@@ -203,9 +205,40 @@ export function musePlugin(root: string): Plugin {
       return { seq: live.seq, spec: live.spec, saw: live.saw, heard: live.heard, feeling: live.feeling, ms: live.ms, model: live.model, lookCost: cost, meter: m };
     },
 
+    // Once per live session: Ember chooses its own avatar as a CGI asset. This
+    // becomes the base body the sensing loop reacts on top of.
+    '/api/design': async () => {
+      if (isMock()) {
+        live.base = live.spec = mockSense().spec;
+      } else {
+        const [designPrompt, schema] = await Promise.all([loadPrompt(root, 'design.md'), loadPrompt(root, 'avatar-schema.md')]);
+        // A long parts list sometimes comes back as malformed JSON: try up to 3 times.
+        let res: any;
+        for (let i = 0; i < 3 && !res; i++) {
+          try {
+            res = await chatJson({ model: models().designer, system: `${designPrompt}\n\n${schema}`, user: 'Choose and design your avatar.', temperature: 0.7, maxTokens: 6000 });
+          } catch (err) {
+            if (i === 2) throw err;
+          }
+        }
+        const s: any = res.json?.spec ?? res.json;
+        live.base = live.spec = s;
+        const u: any = res.usage ?? {};
+        const cost = u.cost != null && Number.isFinite(Number(u.cost)) ? Number(u.cost) : (Number(u.prompt_tokens) || 0) * PRICE_IN + (Number(u.completion_tokens) || 0) * PRICE_OUT;
+        live.meter.cost += cost;
+        live.meter.promptTokens += Number(u.prompt_tokens) || 0;
+        live.meter.completionTokens += Number(u.completion_tokens) || 0;
+        void saveRun(root, 'design', { spec: s, usage: u, cost, ms: res.ms });
+      }
+      live.seq += 1;
+      live.feeling = 'chose its avatar';
+      return { seq: live.seq, spec: live.spec, feeling: live.feeling, meter: live.meter };
+    },
+
     '/api/reset': async () => {
       live.seq += 1;
       live.spec = null;
+      live.base = null;
       live.saw = live.heard = live.feeling = live.frame = '';
       live.meter = { cost: 0, looks: 0, promptTokens: 0, completionTokens: 0, estimated: false, budget: 1 };
       return { ok: true };

@@ -195,7 +195,16 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
   const tap = new AudioTap(stream);
   await tap.resume();
   const canvas = document.createElement('canvas');
-  ov.status('Listening… first look in a few seconds.');
+  // Ember chooses its own avatar first (once); the looks then react on top.
+  ov.status('Ember is choosing its avatar…');
+  try {
+    const res = await fetch('/api/design', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    apply(ov, data);
+  } catch (err) {
+    ov.status(`Design failed, reacting with the default body: ${(err as Error).message}`, true);
+  }
 
   let inFlight = 0;
   let sent = 0;
