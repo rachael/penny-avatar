@@ -1,6 +1,6 @@
 // Live mode (?live=1, the phone): camera + mic → every ~6 s, 4 s of 16 kHz mono
 // WAV plus one 512 px JPEG go to /api/sense; Muse Ember answers with a new body
-// and motion as its own reaction, and a slim spend meter keeps the running cost.
+// and motion as its own reaction (about once a second, several looks in flight), and a slim spend meter keeps the running cost.
 // The camera feed fills the screen behind a transparent canvas and the 3D camera
 // turns with the phone, so the avatar stays put in the room.
 // Mirror mode (?mirror=1, the laptop): polls /api/state and follows the phone,
@@ -13,7 +13,8 @@ const params = new URLSearchParams(location.search);
 export const liveMode: 'live' | 'mirror' | null =
   params.get('mirror') === '1' ? 'mirror' : params.get('live') === '1' ? 'live' : null;
 
-const LOOK_EVERY_MS = 6000;
+const LOOK_EVERY_MS = 1000;
+const MAX_IN_FLIGHT = 4; // each look takes 5-13 s, so overlap them to see about once a second
 const AUDIO_SECONDS = 4;
 const TARGET_RATE = 16000;
 const FRAME_PX = 512;
@@ -196,12 +197,15 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
   const canvas = document.createElement('canvas');
   ov.status('Listening… first look in a few seconds.');
 
-  let inFlight = false;
+  let inFlight = 0;
+  let sent = 0;
+  let applied = 0;
   const look = async () => {
-    if (inFlight) return;
+    if (inFlight >= MAX_IN_FLIGHT) return;
     const image = grabFrame(video, canvas);
     if (!image) return;
-    inFlight = true;
+    const id = ++sent;
+    inFlight++;
     try {
       const res = await fetch('/api/sense', {
         method: 'POST',
@@ -210,11 +214,14 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-      apply(ov, data);
+      if (id > applied) {
+        applied = id; // answers can arrive out of order; keep only the newest
+        apply(ov, data);
+      } else if (data.meter) ov.meter(data.meter);
     } catch (err) {
       ov.status(`Look failed: ${(err as Error).message}`, true);
     } finally {
-      inFlight = false;
+      inFlight--;
     }
   };
   // First look once the audio buffer has ~4 s in it, then every ~6 s.

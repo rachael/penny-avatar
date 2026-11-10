@@ -20,7 +20,10 @@ const NEAR_HAND = 0.35;
 const DEPTH_NEAR = 1.2;
 const DEPTH_FAR = 3.0;
 const FLAT_SCALE = 1.0; // small enough to read as a thing in the room, not a sticker
-const EDGE_MARGIN = 0.06; // fraction of the half-frame kept clear at the edges
+const EDGE_MARGIN = 0.06;
+// Where it rests in live mode (frame units), and how long a look-around lasts.
+const CORNER = { x: 0.72, y: -0.62, z: -0.25 };
+const EXCURSION_S = 4; // fraction of the half-frame kept clear at the edges
 
 const smooth01 = (x: number) => x * x * (3 - 2 * x);
 
@@ -61,6 +64,9 @@ export class AvatarSystem extends createSystem({}) {
   private rawOffset = new Vector3();
   private finalPos = new Vector3();
   private pathPhase = 0;
+  // Live mode: home is the bottom-right corner; a new look that points
+  // somewhere else sends it on a short excursion, then it drifts home.
+  private excursionUntil = 0;
   private dartFrom = new Vector3();
   private dartTo = new Vector3();
   private dartT = 1; // 0..1 progress of the current dart
@@ -97,6 +103,8 @@ export class AvatarSystem extends createSystem({}) {
       // the anchor where it is, so it glides on toward the new motion target.
       // live.ts owns the status line in live mode.
       liveBus.on((spec) => {
+        const mo = spec.motion;
+        if (Math.hypot(mo.x - CORNER.x, mo.y - CORNER.y) > 0.35) this.excursionUntil = this.t + EXCURSION_S;
         // A new look every ~6 s: a softer pop than a fresh avatar, and the
         // reaction's own energy carries the feeling into the next frames.
         this.show(spec);
@@ -205,11 +213,13 @@ export class AvatarSystem extends createSystem({}) {
     let u: number;
     let v: number;
     if (flat) {
-      d = DEPTH_FAR + ((m.z + 1) / 2) * (DEPTH_NEAR - DEPTH_FAR);
+      const home = liveMode !== null && this.t >= this.excursionUntil;
+      const mx = home ? CORNER.x : m.x, my = home ? CORNER.y : m.y, mz = home ? CORNER.z : m.z;
+      d = DEPTH_FAR + ((mz + 1) / 2) * (DEPTH_NEAR - DEPTH_FAR);
       const hy = Math.max(0, d * halfTan * (1 - EDGE_MARGIN) - bodyR);
       const hx = Math.max(0, d * halfTan * aspect * (1 - EDGE_MARGIN) - bodyR);
-      u = m.x * hx;
-      v = m.y * hy;
+      u = mx * hx;
+      v = my * hy;
     } else {
       d = -m.z * 0.4; // HOME is the origin here; near = towards the player
       u = m.x * 0.5;
