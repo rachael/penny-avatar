@@ -30,8 +30,19 @@ Return ONE JSON object with exactly these keys. Numbers outside a range are clam
     "gaze":  { ...same shape },
     "press": { ...same shape },
     "leave": { ...same shape }
+  },
+  "motion": {                           // where you go in the viewer's frame, and how
+    "x": -1..1,                         // left .. right of the visible frame
+    "y": -1..1,                         // bottom .. top
+    "z": -1..1,                         // far (about 3 m) .. near (about 1.2 m)
+    "path": "orbit" | "dart" | "wander" | "hover",  // circle the spot, hold then jump, meander, gentle bob
+    "speed": 0-1,                       // how fast you move along the path and toward a new spot
+    "jitter": 0-1,                      // 0 silk-smooth .. 1 twitchy
+    "radius": 0-1                       // how wide the path swings around the spot
   }
 }
+
+You always stay on screen; moving to a new x/y/z glides there, never teleports.
 
 Custom surface GLSL ("surface.glsl"): write ONLY the body of this function; it is
 compiled inside a fragment shader. If it fails to compile, the renderer falls back

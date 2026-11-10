@@ -4,6 +4,7 @@
 export const BASES = ['orb', 'crystal', 'torus', 'blob', 'swarm', 'ribbon', 'lattice'] as const;
 export const STYLES = ['iridescent', 'glass', 'emissive', 'matte', 'holographic', 'liquid'] as const;
 export const EYE_STYLES = ['dot', 'ring', 'slit'] as const;
+export const MOTION_PATHS = ['orbit', 'dart', 'wander', 'hover'] as const;
 
 export interface Reaction {
   energy: number;
@@ -28,6 +29,16 @@ export interface AvatarSpec {
   glyphSvg: string | null;
   ambient: { pulseRate: number; pulseDepth: number; drift: number; hueShift: number };
   reactions: { near: Reaction; gaze: Reaction; press: Reaction; leave: Reaction };
+  /** Where it goes in the visible frame and how it gets there (all -1..1 / 0..1). */
+  motion: {
+    x: number; // -1 left .. 1 right of the visible frame
+    y: number; // -1 bottom .. 1 top
+    z: number; // -1 far .. 1 near
+    path: (typeof MOTION_PATHS)[number];
+    speed: number; // 0..1
+    jitter: number; // 0 silk-smooth .. 1 twitchy
+    radius: number; // 0..1 how wide the path swings around the target
+  };
 }
 
 /** Shown before the first call returns, and whenever a call fails. */
@@ -51,6 +62,7 @@ export const FALLBACK_SPEC: AvatarSpec = {
     press: { energy: 1, spin: 2, scalePop: 0.2, burst: 1, tint: '#ffffff' },
     leave: { energy: 0.1, spin: 0, scalePop: 0, burst: 0, tint: null },
   },
+  motion: { x: 0, y: 0, z: 0, path: 'hover', speed: 0.3, jitter: 0.1, radius: 0.3 },
 };
 
 const num = (v: unknown, lo: number, hi: number, d: number) => {
@@ -90,7 +102,7 @@ export function sanitizeSpec(input: unknown): AvatarSpec {
   const d = FALLBACK_SPEC;
   const pal = obj(s.palette), form = obj(s.form), surf = obj(s.surface), feat = obj(s.features);
   const eyes = obj(feat.eyes), rings = obj(feat.rings), parts = obj(feat.particles);
-  const amb = obj(s.ambient), re = obj(s.reactions);
+  const amb = obj(s.ambient), re = obj(s.reactions), mo = obj(s.motion);
   const glsl = typeof surf.glsl === 'string' && surf.glsl.trim().length > 8 && surf.glsl.length < 6000 ? surf.glsl : null;
   return {
     name: str(s.name, d.name, 40),
@@ -145,6 +157,15 @@ export function sanitizeSpec(input: unknown): AvatarSpec {
       gaze: reaction(re.gaze, d.reactions.gaze),
       press: reaction(re.press, d.reactions.press),
       leave: reaction(re.leave, d.reactions.leave),
+    },
+    motion: {
+      x: num(mo.x, -1, 1, d.motion.x),
+      y: num(mo.y, -1, 1, d.motion.y),
+      z: num(mo.z, -1, 1, d.motion.z),
+      path: pick(mo.path, MOTION_PATHS, d.motion.path),
+      speed: num(mo.speed, 0, 1, d.motion.speed),
+      jitter: num(mo.jitter, 0, 1, d.motion.jitter),
+      radius: num(mo.radius, 0, 1, d.motion.radius),
     },
   };
 }

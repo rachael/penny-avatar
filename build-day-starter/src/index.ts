@@ -1,4 +1,4 @@
-import { VisibilityState, World } from '@iwsdk/core';
+import { Color, SRGBColorSpace, VideoTexture, VisibilityState, World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import { AvatarSystem } from './avatar/avatar-system.js';
 import { CanvasSystem } from './canvas-system.js';
@@ -15,6 +15,18 @@ World.create(document.getElementById('scene-container') as HTMLDivElement, proje
   world.registerSystem(PanelSystem);
   world.visibilityState.subscribe((v) => hud.setVisible(v === VisibilityState.NonImmersive));
 
+  if (liveMode) {
+    // Phone and mirror are flat screens: no starter panel, a dark stage, and on
+    // the phone the camera feed itself becomes the backdrop.
+    const panel = world.getSceneObject('welcome-panel') as any;
+    if (panel) panel.visible = false;
+    world.scene.background = new Color('#0d0b07');
+    window.addEventListener('penny-camera', (e) => {
+      const tex = new VideoTexture((e as CustomEvent<HTMLVideoElement>).detail);
+      tex.colorSpace = SRGBColorSpace;
+      world.scene.background = tex;
+    });
+  }
   startLiveMode();
   const h = await health();
   if (!h) ui.setStatus('Dev server API not reachable.');

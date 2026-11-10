@@ -192,6 +192,8 @@ async function startLive(ov: ReturnType<typeof mountOverlay>) {
   video.srcObject = stream;
   document.body.appendChild(video);
   await video.play().catch(() => {});
+  // index.ts puts the camera feed behind the avatar, so it floats in the room.
+  window.dispatchEvent(new CustomEvent('penny-camera', { detail: video }));
   const tap = new AudioTap(stream);
   await tap.resume();
   const canvas = document.createElement('canvas');
