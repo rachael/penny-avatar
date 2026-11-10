@@ -47,7 +47,6 @@ function mountOverlay() {
         border: 0; background: #e9b949; color: #1a1406; margin-top: 8px; width: 100%; }
       #penny-cam { position: fixed; top: 12px; right: 12px; z-index: 20; width: 96px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25);
         background: #000; aspect-ratio: 3/4; object-fit: cover; }
-      #penny-cam:not([src]):not([srcObject]) { visibility: hidden; }
     </style>
     <div class="top"><span class="brand">Penny Avatar · Muse Ember</span><span class="name" id="p-name">&nbsp;</span></div>
     <div class="cost" id="p-cost">$0.0000 <small>of $1.00</small></div>
