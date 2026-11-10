@@ -35,7 +35,18 @@ export function extractJson(text) {
   return JSON.parse(body.slice(start, end + 1));
 }
 
+// Venue Wi-Fi drops connections now and then ("fetch failed"): retry once.
 async function post(body) {
+  try {
+    return await postOnce(body);
+  } catch (err) {
+    if (err.status) throw err;
+    await new Promise((r) => setTimeout(r, 400));
+    return postOnce(body);
+  }
+}
+
+async function postOnce(body) {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -74,9 +85,19 @@ export async function chatJson({ model, system, user, temperature = 0.9, maxToke
     if (err.status !== 400) throw err;
     data = await post(base); // provider didn't accept response_format
   }
-  const content = data?.choices?.[0]?.message?.content;
-  const text = Array.isArray(content) ? content.map((c) => c.text ?? '').join('') : content;
-  return { json: extractJson(text), ms: Date.now() - t0, model: data?.model ?? model, usage: data?.usage };
+  const read = (d) => {
+    const content = d?.choices?.[0]?.message?.content;
+    return extractJson(Array.isArray(content) ? content.map((c) => c.text ?? '').join('') : content);
+  };
+  let json;
+  try {
+    json = read(data);
+  } catch {
+    // Malformed or truncated JSON now and then: ask once more.
+    data = await post({ ...base, response_format: { type: 'json_object' } });
+    json = read(data);
+  }
+  return { json, ms: Date.now() - t0, model: data?.model ?? model, usage: data?.usage };
 }
 
 /** Image generation (Muse Image). Returns a data: or https: URL, or throws. */
